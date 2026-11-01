@@ -7,10 +7,31 @@
 
 ---
 
+## 界面预览
+
+桌面端进程列表：
+
+<img src="docs/limits-desktop.png" width="780" alt="桌面端进程列表">
+
+移动端（窄屏自动切换为卡片布局）：
+
+| 进程列表 | 系统概览 | 进程详情 |
+|:---:|:---:|:---:|
+| <img src="docs/mobile/01-list.png" width="200"> | <img src="docs/mobile/02-sidebar.png" width="200"> | <img src="docs/mobile/03-detail.png" width="200"> |
+| **长按菜单** | **启动进程** | **资源限制** |
+| <img src="docs/mobile/04-context-menu.png" width="200"> | <img src="docs/mobile/05-launch.png" width="200"> | <img src="docs/limits-mobile.png" width="200"> |
+
+设置内存上限时的二次确认（该限制不可远程撤销）：
+
+<img src="docs/limits-memory-warning.png" width="420" alt="内存上限警告">
+
+---
+
 ## 在飞牛 NAS 上安装
 
-1. 打开飞牛桌面 → **应用中心**
-2. 找到「上传应用 / 手动安装」入口，选择 `build_nas/dist/winrmmanager_1.0.1_x86.fpk`
+1. 从 [Releases](https://github.com/peterxulove/winrm-manager/releases) 下载最新的 `winrmmanager_x.x.x_x86.fpk`
+   （或自己用 `build_nas/build_fpk.sh` 构建）
+2. 打开飞牛桌面 → **应用中心** → 找到「上传应用 / 手动安装」入口，选中该 `.fpk` 文件
 3. 按向导填写两项：
    - **Web 访问端口**：默认 `5178`
    - **Web 访问密码**：必填。这个密码用于保护界面，避免局域网内其他人操作你的 Windows 主机
@@ -172,7 +193,7 @@ winrm-manager/
 │   ├── assets/                生命周期脚本、图标、配置模板
 │   ├── test_linux.py          容器内业务链路测试
 │   └── dist/
-│       └── winrmmanager_1.0.1_x86.fpk
+│       └── winrmmanager_1.0.4_x86.fpk
 ├── 启动.command                macOS 本地运行（终端模式）
 ├── 停止服务.command
 └── WinRM Manager.app           macOS 双击启动
@@ -181,7 +202,7 @@ winrm-manager/
 ### fpk 包内部结构
 
 ```
-winrmmanager_1.0.1_x86.fpk  (tar.gz)
+winrmmanager_1.0.4_x86.fpk  (tar.gz)
 ├── manifest                  名称、版本、架构、install_type、app.tgz 的 MD5
 ├── app.tgz                   程序本体：server.py + static/ + vendor/ + bin/ + ui/
 ├── cmd/                      生命周期脚本（install / upgrade / start / stop / status / uninstall）
@@ -306,6 +327,6 @@ vendor/cp313/
 
 - **Web 访问密码**：NAS 部署时强制设置，所有 API 请求需带 token
 - **系统进程保护**：16 类关键进程硬性拦截
-- **非 root 运行**：应用以独立用户 `winrmmanager` 运行（v1.0.1 起改为 `install_type = root` 以符合飞牛原生应用规范；服务只监听配置端口、只读写自己的数据目录）
+- **安装类型**：`install_type = root`（符合飞牛原生应用规范）；服务只监听配置端口、只读写自己的数据目录
 - **密码不落盘**：前端不保存 Windows 密码；NAS 上的访问密码存在 `var/config.env`，权限 600
 - **目录穿越防护**：静态文件服务做了路径规范化校验
