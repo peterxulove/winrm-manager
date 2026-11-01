@@ -1,0 +1,89 @@
+#!/bin/bash
+# WinRM Manager 生命周期主脚本
+# start / stop / status 三个子命令由 fnOS 调用
+# status 约定：exit 0 = 运行中，exit 3 = 未运行
+
+APP_DIR="${TRIM_APPDEST}"
+VAR_DIR="${TRIM_PKGVAR}"
+PID_FILE="${VAR_DIR}/server.pid"
+LOG_FILE="${VAR_DIR}/server.log"
+
+mkdir -p "$VAR_DIR"
+
+# 读取安装时保存的配置（端口、访问密码）
+if [ -f "${VAR_DIR}/config.env" ]; then
+  # shellcheck disable=SC1091
+  . "${VAR_DIR}/config.env"
+fi
+PORT="${WINRM_PORT:-5178}"
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null)"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+port_open() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -s -m 1 -o /dev/null "http://127.0.0.1:${PORT}/api/health" 2>/dev/null
+    return $?
+  fi
+  (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null || return 1
+  exec 3>&- 2>/dev/null
+  return 0
+}
+
+case "$1" in
+  start)
+    if is_running && port_open; then
+      exit 0
+    fi
+    export WINRM_HOST="0.0.0.0"
+    export WINRM_PORT="$PORT"
+    export WINRM_WEB_PASSWORD="${WINRM_WEB_PASSWORD:-}"
+    nohup "${APP_DIR}/bin/run.sh" >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+
+    for _ in $(seq 1 60); do
+      sleep 0.25
+      if port_open; then
+        exit 0
+      fi
+      if ! is_running; then
+        echo "WinRM Manager 启动失败，详见 ${LOG_FILE}" >&2
+        tail -20 "$LOG_FILE" >&2
+        rm -f "$PID_FILE"
+        exit 1
+      fi
+    done
+    echo "WinRM Manager 启动超时，详见 ${LOG_FILE}" >&2
+    exit 1
+    ;;
+
+  stop)
+    if is_running; then
+      local_pid="$(cat "$PID_FILE" 2>/dev/null)"
+      kill "$local_pid" 2>/dev/null
+      for _ in $(seq 1 40); do
+        kill -0 "$local_pid" 2>/dev/null || break
+        sleep 0.25
+      done
+      kill -0 "$local_pid" 2>/dev/null && kill -9 "$local_pid" 2>/dev/null
+    fi
+    rm -f "$PID_FILE"
+    exit 0
+    ;;
+
+  status)
+    if is_running && port_open; then
+      exit 0
+    fi
+    exit 3
+    ;;
+
+  *)
+    exit 1
+    ;;
+esac

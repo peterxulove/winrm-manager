@@ -1,0 +1,33 @@
+[
+  {
+    "stepTitle": "卸载 WinRM Manager",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "请选择如何处理应用数据（访问密码等配置）："
+      },
+      {
+        "type": "radio",
+        "field": "wizard_data_action",
+        "label": "数据处理方式",
+        "initValue": "keep",
+        "options": [
+          {
+            "label": "保留配置 - 重新安装时可继续使用",
+            "value": "keep"
+          },
+          {
+            "label": "删除配置 - 此操作不可恢复",
+            "value": "delete"
+          }
+        ],
+        "rules": [
+          {
+            "required": true,
+            "message": "请选择数据处理方式"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,43 @@
+#!/bin/bash
+# 安装后：持久化向导配置，并做一次真实启动自检
+ERR_LOG="${TRIM_TEMP_LOGFILE:-/tmp/winrmmanager_install.log}"
+VAR_DIR="${TRIM_PKGVAR}"
+APPDIR="${TRIM_APPDEST}"
+
+fail() {
+  echo "$1" > "$ERR_LOG"
+  exit 1
+}
+
+mkdir -p "$VAR_DIR" || fail "无法创建数据目录 $VAR_DIR"
+
+PORT="${wizard_port:-5178}"
+PASSWORD="${wizard_password:-}"
+
+cat > "${VAR_DIR}/config.env" <<CONF
+WINRM_PORT='${PORT}'
+WINRM_WEB_PASSWORD='${PASSWORD}'
+CONF
+chmod 600 "${VAR_DIR}/config.env"
+
+# 自检：确认内置依赖能在本机 Python 上正常加载
+PYVER="$(python3 -c 'import sys;print("%d%d" % sys.version_info[:2])' 2>/dev/null)"
+CFI_DIR=""
+[ -d "${APPDIR}/vendor/cp${PYVER}" ] && CFI_DIR=":${APPDIR}/vendor/cp${PYVER}"
+export PYTHONPATH="${APPDIR}/vendor/common${CFI_DIR}"
+export PYTHONDONTWRITEBYTECODE=1
+
+if ! python3 -c "import winrm, requests_ntlm, cryptography" 2>/tmp/wm_import_err; then
+  {
+    echo "内置依赖无法加载（Python ${PYVER}）："
+    echo
+    cat /tmp/wm_import_err
+    echo
+    echo "该应用包仅支持 x86_64 架构的 fnOS。"
+  } > "$ERR_LOG"
+  rm -f /tmp/wm_import_err
+  exit 1
+fi
+rm -f /tmp/wm_import_err
+
+exit 0

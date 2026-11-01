@@ -1,0 +1,27 @@
+# ---- 构建产物（可由 build_nas/build_fpk.sh 重新生成）----
+build_nas/app/
+build_nas/fpk/
+build_nas/wheels/
+build_nas/*.tar
+build_nas/dist/
+dist/
+*.fpk
+
+# ---- macOS ----
+.DS_Store
+._*
+.AppleDouble
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 运行期文件 ----
+*.log
+config.env
+server.pid

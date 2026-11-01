@@ -1,0 +1,18 @@
+#!/bin/bash
+# 安装前环境检查：缺依赖时把原因写进 TRIM_TEMP_LOGFILE，安装器会弹窗展示
+ERR_LOG="${TRIM_TEMP_LOGFILE:-/tmp/winrmmanager_install.log}"
+
+fail() {
+  echo "$1" > "$ERR_LOG"
+  exit 1
+}
+
+command -v python3 >/dev/null 2>&1 || fail "系统缺少 python3，无法安装 WinRM Manager"
+
+PYVER="$(python3 -c 'import sys;print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+[ -n "$PYVER" ] || fail "无法获取 python3 版本"
+
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null \
+  || fail "python3 版本过低（需要 3.9 及以上）"
+
+exit 0

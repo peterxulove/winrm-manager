@@ -1,0 +1,6 @@
+#!/bin/bash
+# 升级前：停止旧版本服务
+if [ -x "${TRIM_APPDEST}/cmd/main" ]; then
+  "${TRIM_APPDEST}/cmd/main" stop >/dev/null 2>&1
+fi
+exit 0

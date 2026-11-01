@@ -1,0 +1,17 @@
+#!/bin/bash
+# 用户修改配置后：重写配置并重启服务
+VAR_DIR="${TRIM_PKGVAR}"
+mkdir -p "$VAR_DIR"
+
+PORT="${wizard_port:-5178}"
+PASSWORD="${wizard_password:-}"
+
+cat > "${VAR_DIR}/config.env" <<CONF
+WINRM_PORT='${PORT}'
+WINRM_WEB_PASSWORD='${PASSWORD}'
+CONF
+chmod 600 "${VAR_DIR}/config.env"
+
+"${TRIM_APPDEST}/cmd/main" stop >/dev/null 2>&1
+"${TRIM_APPDEST}/cmd/main" start >/dev/null 2>&1
+exit 0

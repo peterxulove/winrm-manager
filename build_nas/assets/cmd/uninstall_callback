@@ -1,0 +1,6 @@
+#!/bin/bash
+# 卸载后：按用户选择清理数据
+if [ "${wizard_data_action:-keep}" = "delete" ]; then
+  rm -rf "${TRIM_PKGVAR}" 2>/dev/null || true
+fi
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/bash
+# 卸载前：停止服务，避免残留进程
+if [ -x "${TRIM_APPDEST}/cmd/main" ]; then
+  "${TRIM_APPDEST}/cmd/main" stop >/dev/null 2>&1
+fi
+pkill -x "run.sh" 2>/dev/null || true
+exit 0

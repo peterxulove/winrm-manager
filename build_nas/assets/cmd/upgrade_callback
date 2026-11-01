@@ -1,0 +1,8 @@
+#!/bin/bash
+# 升级后：保留原有配置，重新启动
+VAR_DIR="${TRIM_PKGVAR}"
+[ -f "${VAR_DIR}/config.env" ] || {
+  printf "WINRM_PORT='5178'\nWINRM_WEB_PASSWORD=''\n" > "${VAR_DIR}/config.env"
+  chmod 600 "${VAR_DIR}/config.env"
+}
+exit 0
