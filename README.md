@@ -3,7 +3,7 @@
 在浏览器里远程管理 Windows 主机的进程 —— 实时查看进程列表、CPU/内存占用、结束进程（支持进程树）、启动新进程。目标机无需安装任何客户端，只要启用 WinRM。
 
 - **飞牛 fnOS**：打成 `.fpk` 包，在应用中心上传即可安装
-- **macOS**：也能本地跑（`启动.command` / `WinRM Manager.app`）
+- **macOS**：下载 `.app` 双击运行，内置依赖无需安装
 
 ---
 
@@ -52,6 +52,32 @@
 | 服务端口 | 安装时填写的端口，默认 5178 |
 
 升级或重装时配置目录保留，访问密码不会丢失。
+
+---
+
+## 在 macOS 上运行
+
+从 [Releases](https://github.com/peterxulove/winrm-manager/releases) 下载 `WinRM-Manager-macOS.zip`，解压后双击 `WinRM Manager.app` 即可。
+
+- 应用是**自包含**的：服务端代码与 Python 依赖都打包在 `.app` 内部，**不需要 pip install**
+- 内置依赖兼容 **Python 3.9–3.13**，macOS 自带的 `/usr/bin/python3` 也能直接运行
+- 首次打开若提示「无法验证开发者」，**右键点图标 → 打开**
+- 服务在后台运行，日志在 `~/.winrm-manager/server.log`
+
+> 当前构建为 Apple Silicon（arm64）。Intel Mac 上会回退使用系统 Python 的依赖，需要先执行 `pip3 install pywinrm requests-ntlm`。
+
+从源码直接跑（开发调试用）：
+
+```bash
+pip3 install pywinrm requests-ntlm
+./启动.command
+```
+
+自行构建自包含 `.app`：
+
+```bash
+cd build_mac && ./build_mac.sh    # 产物在 build_mac/dist/
+```
 
 ---
 
@@ -196,7 +222,9 @@ winrm-manager/
 │       └── winrmmanager_1.0.4_x86.fpk
 ├── 启动.command                macOS 本地运行（终端模式）
 ├── 停止服务.command
-└── WinRM Manager.app           macOS 双击启动
+└── build_mac/                  macOS .app 构建
+    ├── build_mac.sh            一键构建自包含 .app
+    └── assets/                 launcher 与图标
 ```
 
 ### fpk 包内部结构

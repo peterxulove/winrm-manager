@@ -25,3 +25,10 @@ env/
 *.log
 config.env
 server.pid
+
+# ---- macOS 应用包与构建产物（从 Releases 下载）----
+WinRM Manager.app/
+build_mac/*.app/
+build_mac/*.zip
+build_mac/wheels*/
+build_mac/dist/
