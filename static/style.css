@@ -2270,3 +2270,379 @@ td.num > div {
     font-size: 17px;
   }
 }
+
+/* ============================================================
+   自动限制游戏进程
+   ============================================================ */
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-link {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border-soft);
+  background: var(--panel-2);
+  transition: all 0.15s;
+}
+
+.panel-link:hover {
+  color: #9dc4ff;
+  border-color: rgba(61, 139, 253, 0.4);
+  background: var(--accent-soft);
+}
+
+.panel-link b {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 开关行 ---- */
+
+.auto-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+
+.auto-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.auto-thr {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.auto-thr input {
+  width: 46px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+
+.auto-thr input::-webkit-outer-spin-button,
+.auto-thr input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.auto-thr input:focus {
+  outline: none;
+  border-color: rgba(61, 139, 253, 0.55);
+}
+
+.auto-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.auto-hint b {
+  color: var(--text-dim);
+  font-weight: 550;
+}
+
+/* ---- 已限制列表 ---- */
+
+.auto-limited {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.auto-limited:not(:empty) {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 8px;
+}
+
+.auto-limited-head {
+  font-size: 10.5px;
+  color: var(--warn);
+  letter-spacing: 0.2px;
+  margin-bottom: 1px;
+}
+
+.auto-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: var(--panel-2);
+}
+
+.auto-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.auto-item-reason {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warn);
+  opacity: 0.85;
+}
+
+.auto-item-btn {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  transition: all 0.15s;
+}
+
+.auto-item-btn:hover {
+  color: #9dc4ff;
+  border-color: rgba(61, 139, 253, 0.45);
+  background: var(--accent-soft);
+}
+
+/* ---- 进程列表里的游戏角标 ---- */
+
+.gtag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  vertical-align: 1px;
+  color: #9dc4ff;
+  background: var(--accent-soft);
+  border: 1px solid rgba(61, 139, 253, 0.3);
+}
+
+.gtag.hot {
+  color: #e5b567;
+  background: rgba(217, 160, 34, 0.12);
+  border-color: rgba(217, 160, 34, 0.35);
+}
+
+/* ---- 名单管理弹窗 ---- */
+
+.modal-wide {
+  width: 520px;
+  max-width: 94vw;
+}
+
+.game-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.game-add input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.game-add input:focus {
+  outline: none;
+  border-color: rgba(61, 139, 253, 0.55);
+}
+
+.game-add .btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: 34px;
+  padding: 0 16px;
+}
+
+.game-search {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.game-search:focus {
+  outline: none;
+  border-color: rgba(61, 139, 253, 0.45);
+}
+
+.game-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.game-group + .game-group {
+  border-top: 1px solid var(--border-soft);
+}
+
+.game-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+}
+
+.game-group-title span {
+  font-family: var(--mono);
+  opacity: 0.7;
+}
+
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+
+.game-row:hover {
+  background: var(--panel-2);
+}
+
+.game-proc {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.game-label {
+  flex-shrink: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.game-del {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.game-del:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.game-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* ---- 移动端 ---- */
+
+@media (max-width: 768px) {
+  .auto-thr input {
+    height: 30px;
+    font-size: 16px;
+    width: 52px;
+  }
+
+  .auto-item {
+    padding: 6px 7px;
+    font-size: 11.5px;
+  }
+
+  .auto-item-btn {
+    padding: 5px 9px;
+    font-size: 11px;
+  }
+
+  .game-list {
+    max-height: 40vh;
+  }
+
+  .game-row {
+    padding: 9px 10px;
+  }
+
+  .game-del {
+    width: 28px;
+    height: 28px;
+    font-size: 17px;
+  }
+
+  .game-add input {
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .game-add .btn {
+    height: 40px;
+  }
+}

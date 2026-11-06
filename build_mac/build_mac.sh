@@ -12,7 +12,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.0.4"
+VERSION="1.1.0"
 APP_NAME="WinRM Manager"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$(cd "$ROOT/.." && pwd)"

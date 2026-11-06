@@ -43,6 +43,8 @@ case "$1" in
     export WINRM_HOST="0.0.0.0"
     export WINRM_PORT="$PORT"
     export WINRM_WEB_PASSWORD="${WINRM_WEB_PASSWORD:-}"
+    # 自动限流配置（开关 / 阈值 / 游戏名单）写在这里，卸载时可一并清理
+    export WINRM_DATA_DIR="${VAR_DIR}"
     nohup "${APP_DIR}/bin/run.sh" >> "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 

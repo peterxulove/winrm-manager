@@ -25,6 +25,12 @@
 
 <img src="docs/limits-memory-warning.png" width="420" alt="内存上限警告">
 
+自动限制游戏进程 —— 侧边栏面板与名单管理：
+
+| 面板（开启并已限制 1 个） | 名单管理（172 项内置） |
+|:---:|:---:|
+| <img src="docs/auto-limit-panel.png" width="270"> | <img src="docs/auto-limit-games.png" width="560"> |
+
 ---
 
 ## 在飞牛 NAS 上安装
@@ -48,10 +54,12 @@
 |---|---|
 | 程序目录 | `/var/apps/winrmmanager/target` |
 | 配置与日志 | `/var/apps/winrmmanager/var/` |
+| 访问密码 | `var/config.env`（权限 600） |
+| 自动限流配置 | `var/auto.json`（开关 / 阈值 / 游戏名单） |
 | 运行用户 | `root`（需监听端口、写系统临时目录） |
 | 服务端口 | 安装时填写的端口，默认 5178 |
 
-升级或重装时配置目录保留，访问密码不会丢失。
+升级或重装时配置目录保留，访问密码与自动限流设置不会丢失。
 
 ---
 
@@ -117,6 +125,24 @@ cd build_mac && ./build_mac.sh    # 产物在 build_mac/dist/
 **CPU 限制是最安全的一项。** 亲和性绑定和优先级调整都是进程级属性，随时可以改回来，不影响进程运行。想给某个吃满 CPU 的进程降降温，优先用这个。
 
 > 限制策略由 Windows 自身执行，即使关掉本应用也继续生效（内存限制尤其如此）。
+
+### 自动限制游戏进程
+
+侧边栏「自动限制游戏」面板可以开启后台巡检：**进程名命中游戏名单**，且 **CPU 或内存占用超过阈值**（默认 15%），就自动把它限制为 **1 个核心 + 最低优先级（Idle）**。
+
+只用这两项是因为它们完全可逆 —— 不碰内存上限（Job Object 设下就撤不回来）。已限制的进程列在面板里，点「恢复」即可还原为全部核心 + 正常优先级，恢复后 10 分钟内不会被再次自动限制。
+
+**阈值**是占全机的百分比：CPU 按 `CPU% = 累计CPU时间增量 / 采样间隔 / 逻辑核数`，内存按 `工作集 / 物理内存总量`。32 GB 机器上 15% 约等于 4.8 GB。
+
+**名单**内置 172 项常见 Windows 游戏进程名（竞技 / 单机 / 平台 / 模拟器四类），点面板上的「名单」可搜索、增删、恢复默认。手动添加时进程名不区分大小写，带不带 `.exe` 都行，填完整路径也会自动取文件名。
+
+**有几类进程绝不会被自动限制**：
+
+- 反作弊与安全组件（EasyAntiCheat、BattlEye、Vanguard、TenProtect、ACE 等）—— 降优先级或改亲和性可能被判定为篡改运行环境，导致掉线甚至封号
+- 系统账户（SYSTEM / LOCAL SERVICE / NETWORK SERVICE）运行的进程
+- 内置的关键系统进程清单
+
+> 这是给「后台挂着游戏客户端 / 启动器，却一直在吃 CPU」这类场景用的。正在玩的游戏被限到 1 核会明显卡顿 —— 不想限制的从名单里删掉即可。
 
 ### 进程操作
 
@@ -219,7 +245,7 @@ winrm-manager/
 │   ├── assets/                生命周期脚本、图标、配置模板
 │   ├── test_linux.py          容器内业务链路测试
 │   └── dist/
-│       └── winrmmanager_1.0.4_x86.fpk
+│       └── winrmmanager_1.1.0_x86.fpk
 ├── 启动.command                macOS 本地运行（终端模式）
 ├── 停止服务.command
 └── build_mac/                  macOS .app 构建
@@ -230,7 +256,7 @@ winrm-manager/
 ### fpk 包内部结构
 
 ```
-winrmmanager_1.0.4_x86.fpk  (tar.gz)
+winrmmanager_1.1.0_x86.fpk  (tar.gz)
 ├── manifest                  名称、版本、架构、install_type、app.tgz 的 MD5
 ├── app.tgz                   程序本体：server.py + static/ + vendor/ + bin/ + ui/
 ├── cmd/                      生命周期脚本（install / upgrade / start / stop / status / uninstall）

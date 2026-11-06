@@ -338,6 +338,9 @@ async function loadProcesses(showSkeleton = false) {
 
     scrollEl.scrollTop = scrollTop;
     $("#conn-dot").className = "dot";
+
+    // 顺带同步自动限流面板（本地接口，不产生远程调用）
+    loadAuto();
   } catch (err) {
     $("#conn-dot").className = "dot err";
     toast(`刷新失败：${err.message}`, "error");
@@ -481,6 +484,9 @@ function renderRows(list) {
           <div class="pcell">
             <div class="pavatar" style="background:${color}">${esc(letter)}</div>
             <span class="pname">${esc(p.name)}${
+        p.isGame ? `<i class="gtag${p.autoLimited ? " hot" : ""}">${
+          p.autoLimited ? "已限流" : "游戏"}</i>` : ""
+      }${
         p.path ? `<small>${esc(p.path.replace(/^.*\\/, ""))}</small>` : ""
       }</span>
           </div>
@@ -533,6 +539,8 @@ function renderCards(list) {
         <div class="pcard-main">
           <div class="pcard-top">
             <span class="pcard-name">${esc(p.name)}</span>
+            ${p.isGame ? `<i class="gtag${p.autoLimited ? " hot" : ""}">${
+              p.autoLimited ? "已限流" : "游戏"}</i>` : ""}
             <span class="pcard-cpu" style="color:${
               cpuPct == null ? "var(--text-faint)" : cpuColor
             }">${cpuText}</span>
@@ -1549,3 +1557,301 @@ $("#drawer-body").addEventListener("click", async (e) => {
     }
   }
 });
+
+/* ============================================================
+   自动限制游戏进程
+   ============================================================ */
+
+const autoState = { data: null, saving: false, query: "", rev: 0 };
+
+async function loadAuto() {
+  // 版本号：GET 在途时若用户改了设置（rev 变化），丢弃这次过期的响应，
+  // 否则开关会"自己跳回去"。
+  const rev = autoState.rev;
+  try {
+    const d = await api("/api/auto");
+    if (rev !== autoState.rev) return;
+    autoState.data = d;
+    renderAutoPanel();
+  } catch {
+    /* 未连接或接口异常时静默，不打扰主流程 */
+  }
+}
+
+function renderAutoPanel() {
+  const d = autoState.data;
+  if (!d) return;
+
+  const sw = $("#auto-limit-switch");
+  sw.classList.toggle("on", d.enabled);
+  sw.setAttribute("aria-checked", String(d.enabled));
+  $("#auto-limit-label").textContent = d.enabled ? "已开启" : "已关闭";
+  $("#auto-game-count").textContent = d.gameCount;
+
+  const thr = $("#auto-threshold");
+  if (document.activeElement !== thr) thr.value = Math.round(d.threshold);
+
+  renderAutoLimited();
+}
+
+function renderAutoLimited() {
+  const d = autoState.data;
+  const box = $("#auto-limited");
+  if (!d || !d.limited.length) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML =
+    `<div class="auto-limited-head">已自动限制 ${d.limitedCount} 个</div>` +
+    d.limited
+      .map(
+        (r) => `<div class="auto-item">
+          <span class="auto-item-name" title="${esc(r.name)}">${esc(r.name)}</span>
+          <span class="auto-item-reason">${esc(r.reason)}</span>
+          <button class="auto-item-btn" data-pid="${r.pid}" title="恢复为全部核心 / 正常优先级">恢复</button>
+        </div>`
+      )
+      .join("");
+}
+
+/** 写入类接口的响应统一走这里：递增版本号，让在途的 GET 失效 */
+function applyAuto(d) {
+  autoState.rev += 1;
+  autoState.data = d;
+  renderAutoPanel();
+  return d;
+}
+
+async function saveAutoSettings(payload) {
+  // 不做互斥：改阈值和开关常被连续点击，丢弃后一次会让界面和服务端不同步。
+  // 服务端有锁，后到的写覆盖先到的即可。
+  try {
+    applyAuto(await api("/api/auto/settings", { method: "POST", body: payload }));
+    if (payload.enabled === true) {
+      toast("自动限流已开启", "success");
+      // 立刻跑一轮，不用等后台定时器
+      scanAuto(true);
+    } else if (payload.enabled === false) {
+      toast("自动限流已关闭", "info");
+    }
+  } catch (err) {
+    toast(err.message + (err.detail ? `：${err.detail}` : ""), "error", 6000);
+    loadAuto();
+  }
+}
+
+async function scanAuto(quiet = false) {
+  try {
+    const d = applyAuto(await api("/api/auto/scan", { method: "POST" }));
+    const n = d.scan ? d.scan.applied.length : 0;
+    if (!quiet) {
+      toast(n ? `本轮限制了 ${n} 个进程` : "本轮没有需要限制的进程",
+        n ? "success" : "info");
+    } else if (n) {
+      toast(`已自动限制 ${n} 个游戏进程`, "success");
+    }
+    loadProcesses(false);
+  } catch (err) {
+    if (!quiet) toast(err.message, "error", 6000);
+  }
+}
+
+/* ---- 侧边栏交互 ---- */
+
+$("#auto-limit-switch").addEventListener("click", () => {
+  const d = autoState.data;
+  if (!d) return;
+  saveAutoSettings({ enabled: !d.enabled });
+});
+
+$("#auto-threshold").addEventListener("change", (e) => {
+  const v = Number(e.target.value);
+  if (!Number.isFinite(v) || v <= 0 || v > 100) {
+    toast("阈值需为 1–100 之间的数字", "error");
+    renderAutoPanel();
+    return;
+  }
+  saveAutoSettings({ threshold: v });
+});
+
+$("#btn-auto-games").addEventListener("click", openGameManager);
+
+$("#auto-limited").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".auto-item-btn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "…";
+  try {
+    applyAuto(await api("/api/auto/restore", {
+      method: "POST",
+      body: { pids: [Number(btn.dataset.pid)] },
+    }));
+    toast("已恢复该进程的 CPU 限制", "success");
+    loadProcesses(false);
+  } catch (err) {
+    toast(err.message, "error", 6000);
+    renderAutoPanel();
+  }
+});
+
+/* ---- 名单管理弹窗 ---- */
+
+function openGameManager() {
+  const d = autoState.data;
+  if (!d) return;
+
+  modal(`
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3>游戏进程名单</h3>
+        <p>按进程名匹配，不区分大小写，可带 <code>.exe</code>。共 <b id="gm-count">${d.gameCount}</b> 项</p>
+      </div>
+      <div class="modal-body">
+        <div class="game-add">
+          <input id="game-input" placeholder="输入进程名，如 genshinimpact.exe" autocomplete="off">
+          <button class="btn btn-primary btn-sm" id="game-add">添加</button>
+        </div>
+        <input id="game-search" class="game-search" placeholder="搜索名单…" autocomplete="off">
+        <div class="game-list" id="game-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="game-reset">恢复默认名单</button>
+        <button class="btn btn-ghost" id="game-close">关闭</button>
+      </div>
+    </div>
+  `);
+
+  renderGameList();
+
+  $("#game-search").addEventListener("input", (e) => {
+    autoState.query = e.target.value.trim().toLowerCase();
+    renderGameList();
+  });
+
+  $("#game-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addGameFromInput();
+  });
+  $("#game-add").addEventListener("click", addGameFromInput);
+
+  $("#game-close").addEventListener("click", closeModal);
+
+  $("#game-reset").addEventListener("click", async () => {
+    if (!confirm("恢复为内置默认名单？你手动添加的项会被清除。")) return;
+    try {
+      applyAuto(await api("/api/auto/games", {
+        method: "POST",
+        body: { action: "reset" },
+      }));
+      renderGameList();
+      toast("已恢复默认名单", "success");
+      loadProcesses(false);
+    } catch (err) {
+      toast(err.message, "error", 6000);
+    }
+  });
+
+  $("#game-list").addEventListener("click", async (e) => {
+    const btn = e.target.closest(".game-del");
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      applyAuto(await api("/api/auto/games", {
+        method: "POST",
+        body: { action: "remove", names: [btn.dataset.proc] },
+      }));
+      renderGameList();
+      loadProcesses(false);
+    } catch (err) {
+      toast(err.message, "error", 6000);
+      btn.disabled = false;
+    }
+  });
+}
+
+async function addGameFromInput() {
+  const input = $("#game-input");
+  const name = input.value.trim();
+  if (!name) {
+    input.focus();
+    return;
+  }
+  const btn = $("#game-add");
+  btn.disabled = true;
+  try {
+    const d = applyAuto(await api("/api/auto/games", {
+      method: "POST",
+      body: { action: "add", names: [name] },
+    }));
+    if (d.skipped && d.skipped.length) {
+      toast(d.skipped[0].error || "添加失败", "error", 6000);
+    } else if (d.added && d.added[0] && !d.added[0].added) {
+      toast(`${d.added[0].proc} 已在名单中`, "info");
+    } else {
+      toast(`已添加 ${d.added[0].proc}`, "success");
+    }
+    input.value = "";
+    input.focus();
+    renderAutoPanel();
+    renderGameList();
+    loadProcesses(false);
+  } catch (err) {
+    toast(err.message, "error", 6000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderGameList() {
+  const d = autoState.data;
+  const box = $("#game-list");
+  if (!d || !box) return;
+
+  $("#gm-count").textContent = d.gameCount;
+
+  const q = autoState.query;
+  const list = q
+    ? d.games.filter(
+        (g) =>
+          g.proc.includes(q) ||
+          (g.label || "").toLowerCase().includes(q) ||
+          (g.cat || "").includes(q)
+      )
+    : d.games;
+
+  if (!list.length) {
+    box.innerHTML = `<div class="game-empty">没有匹配项</div>`;
+    return;
+  }
+
+  // 按分类分组，顺序：自定义优先
+  const groups = new Map();
+  for (const g of list) {
+    const cat = g.custom ? "自定义" : g.cat || "其他";
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(g);
+  }
+  const order = ["自定义", "竞技", "单机", "平台", "模拟器", "其他"];
+  const rank = (c) => {
+    const i = order.indexOf(c);
+    return i === -1 ? 99 : i;
+  };
+  const cats = [...groups.keys()].sort((a, b) => rank(a) - rank(b));
+
+  box.innerHTML = cats
+    .map((cat) => {
+      const items = groups.get(cat);
+      return `<div class="game-group">
+        <div class="game-group-title">${esc(cat)} <span>${items.length}</span></div>
+        ${items
+          .map(
+            (g) => `<div class="game-row">
+              <span class="game-proc">${esc(g.proc)}</span>
+              <span class="game-label">${esc(g.label)}</span>
+              <button class="game-del" data-proc="${esc(g.proc)}" title="从名单移除">×</button>
+            </div>`
+          )
+          .join("")}
+      </div>`;
+    })
+    .join("");
+}

@@ -25,6 +25,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -45,7 +46,7 @@ import winrm  # noqa: E402
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # 结束这些进程会直接导致蓝屏 / 注销 / 网络中断，需要显式确认
 PROTECTED_NAMES = {
@@ -53,6 +54,247 @@ PROTECTED_NAMES = {
     "winlogon", "services", "lsass", "lsaiso", "svchost", "fontdrvhost",
     "dwm", "spoolsv", "audiodg", "wudfhost",
 }
+
+# 反作弊 / 安全组件。这些进程即使名字像游戏也绝不能限流：
+# 降优先级或改亲和性可能被判定为篡改运行环境，导致掉线甚至封号。
+NEVER_LIMIT = {
+    "easyanticheat", "easyanticheat_eos", "easyanticheat_launcher",
+    "beservice", "battleye", "beservice_x64",
+    "vgc", "vgk", "vgtray",
+    "tenprotect", "tenfight", "tenio", "tp3helper",
+    "anticheatexpert", "ace-guard", "acegame",
+    "nprotect", "npggnt", "gameguard",
+    "xhunter1", "mhyprot2", "mhyprot3",
+}
+
+# 常见 Windows 游戏进程名（Get-Process 的 ProcessName，不含 .exe，小写）
+# 分组只用于界面展示，匹配时一律用 proc 字段
+DEFAULT_GAMES = [
+    # ---- 竞技 / 网游 ----
+    ("league of legends", "英雄联盟", "竞技"),
+    ("leagueclient", "英雄联盟客户端", "竞技"),
+    ("leagueclientux", "英雄联盟客户端", "竞技"),
+    ("leagueclientuxrender", "英雄联盟客户端", "竞技"),
+    ("valorant", "无畏契约 / VALORANT", "竞技"),
+    ("valorant-win64-shipping", "无畏契约 / VALORANT", "竞技"),
+    ("cs2", "反恐精英 2", "竞技"),
+    ("csgo", "反恐精英 CS:GO", "竞技"),
+    ("dota2", "Dota 2", "竞技"),
+    ("tslgame", "绝地求生 PUBG", "竞技"),
+    ("r5apex", "Apex 英雄", "竞技"),
+    ("overwatch", "守望先锋", "竞技"),
+    ("narakabladepoint", "永劫无间", "竞技"),
+    ("deltaforceclient", "三角洲行动", "竞技"),
+    ("deltaforce", "三角洲行动", "竞技"),
+    ("crossfire", "穿越火线", "竞技"),
+    ("dnf", "地下城与勇士", "竞技"),
+    ("nsh", "逆水寒", "竞技"),
+    ("jx3client", "剑网 3", "竞技"),
+    ("wow", "魔兽世界", "竞技"),
+    ("wowclassic", "魔兽世界怀旧服", "竞技"),
+    ("diablo iii", "暗黑破坏神 3", "竞技"),
+    ("diablo iv", "暗黑破坏神 4", "竞技"),
+    ("sc2", "星际争霸 2", "竞技"),
+    ("war3", "魔兽争霸 3", "竞技"),
+    ("ffxiv", "最终幻想 14", "竞技"),
+    ("ffxiv_dx11", "最终幻想 14", "竞技"),
+    ("gw2-64", "激战 2", "竞技"),
+    ("blackdesert64", "黑色沙漠", "竞技"),
+    ("lostark", "命运方舟", "竞技"),
+    ("newworld", "新世界", "竞技"),
+    ("eso64", "上古卷轴 OL", "竞技"),
+    ("pathofexile", "流放之路", "竞技"),
+    ("pathofexilesteam", "流放之路", "竞技"),
+    ("worldoftanks", "坦克世界", "竞技"),
+    ("worldofwarships", "战舰世界", "竞技"),
+    ("aces", "战争雷霆", "竞技"),
+    ("rainbowsix", "彩虹六号", "竞技"),
+    ("rainbowsix_dx11", "彩虹六号", "竞技"),
+    ("rainbowsix_vulkan", "彩虹六号", "竞技"),
+    ("thedivision2", "全境封锁 2", "竞技"),
+    ("destiny2", "命运 2", "竞技"),
+    ("rocketleague", "火箭联盟", "竞技"),
+    ("fallguys_client", "糖豆人", "竞技"),
+    ("maplestory", "冒险岛", "竞技"),
+    ("kartrider", "跑跑卡丁车", "竞技"),
+    ("escapefromtarkov", "逃离塔科夫", "竞技"),
+    ("rustclient", "Rust", "竞技"),
+
+    # ---- 单机 / 3A ----
+    ("gta5", "侠盗猎车手 5", "单机"),
+    ("gtav", "侠盗猎车手 5", "单机"),
+    ("rdr2", "荒野大镖客 2", "单机"),
+    ("cyberpunk2077", "赛博朋克 2077", "单机"),
+    ("eldenring", "艾尔登法环", "单机"),
+    ("sekiro", "只狼", "单机"),
+    ("b1-win64-shipping", "黑神话：悟空", "单机"),
+    ("bg3", "博德之门 3", "单机"),
+    ("bg3_dx11", "博德之门 3", "单机"),
+    ("witcher3", "巫师 3", "单机"),
+    ("starfield", "星空", "单机"),
+    ("hogwartslegacy", "霍格沃茨之遗", "单机"),
+    ("itakestwo", "双人成行", "单机"),
+    ("nms", "无人深空", "单机"),
+    ("acorigins", "刺客信条：起源", "单机"),
+    ("acodyssey", "刺客信条：奥德赛", "单机"),
+    ("acvalhalla", "刺客信条：英灵殿", "单机"),
+    ("acmirage", "刺客信条：幻景", "单机"),
+    ("farcry5", "孤岛惊魂 5", "单机"),
+    ("farcry6", "孤岛惊魂 6", "单机"),
+    ("grb", "幽灵行动：断点", "单机"),
+    ("forzahorizon5", "极限竞速：地平线 5", "单机"),
+    ("forzahorizon4", "极限竞速：地平线 4", "单机"),
+    ("f1_23", "F1 23", "单机"),
+    ("f1_24", "F1 24", "单机"),
+    ("f1_25", "F1 25", "单机"),
+    ("nba2k24", "NBA 2K24", "单机"),
+    ("nba2k25", "NBA 2K25", "单机"),
+    ("fc24", "EA SPORTS FC 24", "单机"),
+    ("fc25", "EA SPORTS FC 25", "单机"),
+    ("ts4_x64", "模拟人生 4", "单机"),
+    ("cities", "城市：天际线", "单机"),
+    ("citiesskylines", "城市：天际线", "单机"),
+    ("civilizationvi", "文明 6", "单机"),
+    ("warhammer3", "全面战争：战锤 3", "单机"),
+    ("aoe2de", "帝国时代 2 决定版", "单机"),
+    ("aoe3de", "帝国时代 3 决定版", "单机"),
+    ("aoe4", "帝国时代 4", "单机"),
+    ("reliccardinal", "帝国时代 4", "单机"),
+    ("anno1800", "纪元 1800", "单机"),
+    ("frostpunk2", "冰汽时代 2", "单机"),
+    ("stronghold", "要塞", "单机"),
+    ("terraria", "泰拉瑞亚", "单机"),
+    ("stardew valley", "星露谷物语", "单机"),
+    ("dontstarve", "饥荒", "单机"),
+    ("dontstarve_steam", "饥荒联机版", "单机"),
+    ("oxygennotincluded", "缺氧", "单机"),
+    ("rimworldwin64", "环世界", "单机"),
+    ("factorio", "异星工厂", "单机"),
+    ("subnautica", "深海迷航", "单机"),
+    ("subnauticazero", "深海迷航：零度之下", "单机"),
+    ("valheim", "英灵神殿", "单机"),
+    ("palworld-win64-shipping", "幻兽帕鲁", "单机"),
+    ("lethalcompany", "致命公司", "单机"),
+    ("oncehuman", "七日世界", "单机"),
+    ("helldivers2", "绝地潜兵 2", "单机"),
+    ("remnant2", "遗迹 2", "单机"),
+    ("armoredcore6", "装甲核心 6", "单机"),
+    ("liesofp", "匹诺曹的谎言", "单机"),
+    ("atomicheart", "原子之心", "单机"),
+    ("re4", "生化危机 4 重制版", "单机"),
+    ("re2", "生化危机 2 重制版", "单机"),
+    ("re3", "生化危机 3 重制版", "单机"),
+    ("monsterhunterworld", "怪物猎人：世界", "单机"),
+    ("monsterhunterrise", "怪物猎人：崛起", "单机"),
+    ("dmc5", "鬼泣 5", "单机"),
+    ("nierautomatagame", "尼尔：机械纪元", "单机"),
+    ("ghostoftsushima", "对马岛之魂", "单机"),
+    ("spiderman", "漫威蜘蛛侠", "单机"),
+    ("spiderman2", "漫威蜘蛛侠 2", "单机"),
+    ("horizonzerodawn", "地平线：零之曙光", "单机"),
+    ("daysgone", "往日不再", "单机"),
+    ("deathstranding", "死亡搁浅", "单机"),
+    ("tesv", "上古卷轴 5", "单机"),
+    ("skyrimse", "上古卷轴 5 特别版", "单机"),
+    ("fallout4", "辐射 4", "单机"),
+    ("fallout76", "辐射 76", "单机"),
+    ("doometernal", "毁灭战士：永恒", "单机"),
+    ("borderlands3", "无主之地 3", "单机"),
+    ("shootergame", "方舟：生存进化", "单机"),
+    ("7daystodie", "七日杀", "单机"),
+    ("conansandbox", "流放者柯南", "单机"),
+    ("factorygame", "幸福工厂", "单机"),
+    ("astroneer", "异星探险家", "单机"),
+    ("elitedangerous64", "精英：危险", "单机"),
+    ("starcitizen", "星际公民", "单机"),
+    ("minecraft.windows", "我的世界（基岩版）", "单机"),
+    ("robloxplayerbeta", "Roblox", "单机"),
+    ("robloxplayer", "Roblox", "单机"),
+    ("robloxstudio", "Roblox Studio", "单机"),
+    ("among us", "Among Us", "单机"),
+    ("hollow_knight", "空洞骑士", "单机"),
+    ("hades", "哈迪斯", "单机"),
+    ("hades2", "哈迪斯 2", "单机"),
+    ("deadcells", "死亡细胞", "单机"),
+    ("slaythespire", "杀戮尖塔", "单机"),
+    ("balatro", "小丑牌", "单机"),
+    ("vampire survivors", "吸血鬼幸存者", "单机"),
+    ("cuphead", "茶杯头", "单机"),
+
+    # ---- 平台 / 启动器 ----
+    ("steam", "Steam", "平台"),
+    ("steamwebhelper", "Steam 内嵌浏览器", "平台"),
+    ("epicgameslauncher", "Epic Games 启动器", "平台"),
+    ("wegame", "WeGame", "平台"),
+    ("battle.net", "战网", "平台"),
+    ("eadesktop", "EA App", "平台"),
+    ("origin", "Origin", "平台"),
+    ("ubisoftconnect", "Ubisoft Connect", "平台"),
+    ("uplay", "Uplay", "平台"),
+    ("goggalaxy", "GOG Galaxy", "平台"),
+    ("galaxyclient", "GOG Galaxy", "平台"),
+    ("riotclientservices", "Riot 客户端", "平台"),
+    ("playnite", "Playnite", "平台"),
+
+    # ---- 手游模拟器 ----
+    ("ldplayer", "雷电模拟器", "模拟器"),
+    ("dnplayer", "雷电模拟器", "模拟器"),
+    ("bluestacks", "BlueStacks", "模拟器"),
+    ("bluestacks_nxt", "BlueStacks", "模拟器"),
+    ("hd-player", "逍遥模拟器", "模拟器"),
+    ("mumuplayer", "MuMu 模拟器", "模拟器"),
+    ("nemuplayer", "MuMu 模拟器", "模拟器"),
+    ("mumuvmmheadless", "MuMu 模拟器", "模拟器"),
+    ("nox", "夜神模拟器", "模拟器"),
+    ("noxplayer", "夜神模拟器", "模拟器"),
+    ("memu", "MEmu 模拟器", "模拟器"),
+    ("memuconsole", "MEmu 模拟器", "模拟器"),
+]
+
+
+def normalize_proc(name) -> str:
+    """进程名归一化：去路径、去 .exe、转小写"""
+    s = (name or "").strip().lower().replace("\\", "/")
+    s = s.rsplit("/", 1)[-1]
+    if s.endswith(".exe"):
+        s = s[:-4]
+    return s.strip()
+
+
+def is_system_account(user) -> bool:
+    """判断进程是否以内置系统账户运行 —— 这类进程一律不自动限流"""
+    u = (user or "").strip().lower()
+    if not u:
+        return False
+    tail = u.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    return tail in {
+        "system", "local service", "localservice", "network service",
+        "networkservice", "local system", "trustedinstaller",
+    } or "nt authority" in u
+
+
+def _default_data_dir() -> str:
+    """挑一个可写目录存放配置（安装包目录通常只读）"""
+    env = os.environ.get("WINRM_DATA_DIR", "").strip()
+    if env:
+        try:
+            os.makedirs(env, exist_ok=True)
+            return env
+        except OSError:
+            pass
+    for cand in (os.path.join(os.path.expanduser("~"), ".winrm-manager"),
+                 "/var/lib/winrm-manager"):
+        try:
+            os.makedirs(cand, exist_ok=True)
+            if os.access(cand, os.W_OK):
+                return cand
+        except OSError:
+            continue
+    return tempfile.gettempdir()
+
+
+DATA_DIR = _default_data_dir()
+AUTO_FILE = os.path.join(DATA_DIR, "auto.json")
 
 # Web 访问密码（NAS 部署时由启动脚本注入，防止局域网内任何人操作远程主机）
 WEB_PASSWORD = os.environ.get("WINRM_WEB_PASSWORD", "").strip()
@@ -139,6 +381,8 @@ class Remote:
         self._prev_cpu: dict = {}
         self._prev_ts: float = 0.0
         self._core_count: int = 1
+        # 最近一次进程快照，供自动限流线程复用（避免重复往返打乱采样窗口）
+        self._last_snapshot = None
 
     # -- 底层执行 ---------------------------------------------------
 
@@ -277,6 +521,9 @@ $procs | ForEach-Object {
         now = time.time()
         dt = now - self._prev_ts if self._prev_ts else 0.0
         cores = max(self._core_count, 1)
+        # 采样间隔过长（例如界面闲置了几分钟）时，差值摊到整段时间上会
+        # 把瞬时占用稀释成接近 0，反而误判"很闲"。这种情况丢弃基线重新开始。
+        usable = 0.25 < dt <= 15.0
         new_cache = {}
         for p in rows:
             key = (p.get("pid"), p.get("start"))
@@ -284,7 +531,7 @@ $procs | ForEach-Object {
             pct = None
             if cpu is not None:
                 prev = self._prev_cpu.get(key)
-                if prev is not None and dt > 0.25:
+                if prev is not None and usable:
                     delta = cpu - prev
                     if delta < 0:
                         delta = 0.0
@@ -304,7 +551,37 @@ $procs | ForEach-Object {
             "memUsed": sum(int(p.get("ws") or 0) for p in rows),
             "cpuPct": round(min(total_cpu, 100.0), 1),
         }
-        return {"ts": now, "processes": rows, "stats": stats}
+        result = {"ts": now, "processes": rows, "stats": stats}
+        self._last_snapshot = result
+        return result
+
+    def latest(self, max_age: float = 8.0) -> dict:
+        """
+        取一份"带 CPU 百分比"的进程快照。
+
+        自动限流线程和前端轮询共用同一份数据：既省掉一次 WinRM 往返
+        （单次 0.5–1.5 秒），也避免两个调用方互相截断 CPU 采样窗口
+        导致百分比乱跳。
+
+        CPU% 必须靠两次采样差值算。若当前快照里全是 None（服务刚启动、
+        刚连上、或闲置太久丢弃了基线），补采一次再返回，否则自动限流
+        在第一轮会"看不见"任何占用。
+        """
+        snap = self._last_snapshot
+        if snap and (time.time() - float(snap.get("ts") or 0)) <= max_age \
+                and self._has_cpu(snap):
+            return snap
+
+        first = self.processes()
+        if self._has_cpu(first):
+            return first
+        time.sleep(1.2)
+        return self.processes()
+
+    @staticmethod
+    def _has_cpu(snap: dict) -> bool:
+        return any(p.get("cpuPct") is not None
+                   for p in (snap.get("processes") or []))
 
     def process_detail(self, pid: int) -> dict:
         script = self._decode_cfg_prologue({"pid": int(pid)}) + r"""
@@ -711,6 +988,353 @@ try {
         return data[0] if data else {"ok": False, "error": "无返回"}
 
 
+# ---------------------------------------------------------------- 自动限流
+
+class AutoConfig:
+    """自动限流配置：开关 / 阈值 / 游戏名单，持久化到 auto.json"""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.lock = threading.RLock()
+        self.enabled = False
+        self.threshold = 15.0
+        self.interval = 10.0
+        self.games: dict = {}
+        self._load()
+
+    @staticmethod
+    def _default_games() -> dict:
+        return {p: {"proc": p, "label": lab, "cat": cat, "custom": False}
+                for p, lab, cat in DEFAULT_GAMES}
+
+    def _load(self):
+        data = None
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = None
+
+        # 首次运行（或文件损坏）→ 用内置默认名单播种
+        if not isinstance(data, dict) or not isinstance(data.get("games"), list):
+            with self.lock:
+                self.games = self._default_games()
+            self.save()
+            return
+
+        with self.lock:
+            self.enabled = bool(data.get("enabled"))
+            try:
+                self.threshold = float(data.get("threshold") or 15)
+            except (TypeError, ValueError):
+                self.threshold = 15.0
+            try:
+                self.interval = float(data.get("intervalSec") or 10)
+            except (TypeError, ValueError):
+                self.interval = 10.0
+
+            self.games = {}
+            for g in data["games"]:
+                if isinstance(g, str):
+                    proc = normalize_proc(g)
+                    if not proc:
+                        continue
+                    self.games[proc] = {"proc": proc, "label": proc,
+                                        "cat": "自定义", "custom": True}
+                    continue
+                if not isinstance(g, dict):
+                    continue
+                proc = normalize_proc(g.get("proc"))
+                if not proc:
+                    continue
+                self.games[proc] = {
+                    "proc": proc,
+                    "label": (g.get("label") or proc).strip() or proc,
+                    "cat": (g.get("cat") or "自定义").strip() or "自定义",
+                    "custom": bool(g.get("custom")),
+                }
+        self._clamp()
+
+    def _clamp(self):
+        with self.lock:
+            self.threshold = max(1.0, min(100.0, float(self.threshold)))
+            self.interval = max(5.0, min(120.0, float(self.interval)))
+
+    def save(self):
+        with self.lock:
+            payload = {
+                "enabled": self.enabled,
+                "threshold": self.threshold,
+                "intervalSec": self.interval,
+                "games": list(self.games.values()),
+            }
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=1)
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            try:
+                STATE.log("error", "保存自动限流配置失败", str(exc))
+            except Exception:
+                pass
+
+    # -- 名单操作
+
+    def games_map(self) -> dict:
+        with self.lock:
+            return dict(self.games)
+
+    def add_game(self, name: str, label: str = "", cat: str = "自定义") -> dict:
+        proc = normalize_proc(name)
+        if not proc:
+            raise HttpError(400, "进程名不能为空")
+        if len(proc) > 80:
+            raise HttpError(400, "进程名过长")
+        if proc in NEVER_LIMIT:
+            raise HttpError(400, f"{proc} 是反作弊/安全组件，不能加入限流名单")
+        entry = {"proc": proc, "label": (label or proc).strip() or proc,
+                 "cat": (cat or "自定义").strip() or "自定义", "custom": True}
+        with self.lock:
+            existed = proc in self.games
+            self.games[proc] = entry
+        if not existed:
+            self.save()
+        return {"proc": proc, "added": not existed, **entry}
+
+    def remove_game(self, name: str) -> bool:
+        proc = normalize_proc(name)
+        with self.lock:
+            if proc not in self.games:
+                return False
+            del self.games[proc]
+        self.save()
+        return True
+
+    def reset_games(self) -> int:
+        with self.lock:
+            self.games = self._default_games()
+            n = len(self.games)
+        self.save()
+        return n
+
+    def update(self, enabled=None, threshold=None, interval=None):
+        with self.lock:
+            if enabled is not None:
+                self.enabled = bool(enabled)
+            if threshold is not None:
+                try:
+                    self.threshold = float(threshold)
+                except (TypeError, ValueError):
+                    raise HttpError(400, "阈值必须是数字")
+            if interval is not None:
+                try:
+                    self.interval = float(interval)
+                except (TypeError, ValueError):
+                    raise HttpError(400, "间隔必须是数字")
+        self._clamp()
+        self.save()
+
+
+class AutoLimiter:
+    """
+    后台巡检：游戏进程 CPU 或内存超过阈值 → 限制到 1 核 + 最低优先级。
+
+    只动两样可逆的东西（处理器亲和性、PriorityClass），不碰内存上限，
+    因为 Job Object 一旦设下就无法远程撤销。
+    """
+
+    MAX_PER_TICK = 3          # 每轮最多处理几个，避免一次改太多
+    RESTORE_COOLDOWN = 600    # 手动恢复后 10 分钟内不再自动限制
+
+    def __init__(self, cfg: AutoConfig):
+        self.cfg = cfg
+        self._stop = threading.Event()
+        self._thread = None
+        self.limited: dict = {}     # pid -> 记录
+        self.skip_until: dict = {}  # pid -> 解除冷却到期时间
+        self.last_tick = 0.0
+        self.last_error = ""
+        self.applied_total = 0
+
+    # -- 线程
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="auto-limiter",
+                                        daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _loop(self):
+        while not self._stop.is_set():
+            interval = max(float(self.cfg.interval or 10), 5.0)
+            if self._stop.wait(interval):
+                return
+            if not self.cfg.enabled:
+                continue
+            try:
+                self.tick()
+            except Exception as exc:      # 单轮失败不能让线程死掉
+                self.last_error = f"{type(exc).__name__}: {exc}"
+
+    # -- 单轮巡检
+
+    def tick(self) -> dict:
+        if not self.cfg.enabled:
+            return {"ok": False, "error": "自动限制未开启"}
+        remote = STATE.remote
+        if remote is None:
+            return {"ok": False, "error": "尚未连接远程主机"}
+
+        with self.cfg.lock:
+            threshold = float(self.cfg.threshold)
+            interval = float(self.cfg.interval)
+            games = dict(self.cfg.games)
+
+        total_mem = int(STATE.system.get("totalMem") or 0)
+        snap = remote.latest(max_age=max(6.0, interval * 0.9))
+        procs = snap.get("processes") or []
+
+        # 刚启动的游戏进程在第一次采样里没有可比对的基线（cpuPct=None）。
+        # 这时不能直接放过 —— 补采一次，否则"刚打开的游戏吃满 CPU"这一
+        # 最该被限制的场景反而检测不到。
+        if any(normalize_proc(p.get("name")) in games and p.get("cpuPct") is None
+               for p in procs):
+            time.sleep(1.2)
+            procs = remote.processes().get("processes") or []
+
+        now = time.time()
+        alive = {int(p.get("pid") or 0) for p in procs}
+
+        # 清掉已退出的进程记录
+        for pid in [k for k in self.limited if k not in alive]:
+            self.limited.pop(pid, None)
+        for pid in [k for k, ts in self.skip_until.items() if ts <= now]:
+            self.skip_until.pop(pid, None)
+
+        candidates = []
+        for p in procs:
+            proc = normalize_proc(p.get("name"))
+            if not proc or proc not in games:
+                continue
+            if proc in NEVER_LIMIT or p.get("protected"):
+                continue
+            if is_system_account(p.get("user")):
+                continue
+            pid = int(p.get("pid") or 0)
+            if pid <= 0 or pid in self.limited:
+                continue
+            if self.skip_until.get(pid, 0) > now:
+                continue
+
+            cpu = p.get("cpuPct")
+            cpu = float(cpu) if cpu is not None else None
+            mem_pct = (float(p.get("ws") or 0) / total_mem * 100.0) if total_mem else 0.0
+            cpu_hit = cpu is not None and cpu >= threshold
+            mem_hit = mem_pct >= threshold
+            if not (cpu_hit or mem_hit):
+                continue
+
+            candidates.append({
+                "pid": pid,
+                "name": p.get("name") or proc,
+                "label": games[proc].get("label") or proc,
+                "cpu": cpu,
+                "memPct": round(mem_pct, 1),
+                "ws": int(p.get("ws") or 0),
+                "reason": ("CPU %.1f%%" % cpu) if cpu_hit else ("内存 %.1f%%" % mem_pct),
+            })
+
+        candidates.sort(key=lambda c: -max(c["cpu"] or 0.0, c["memPct"]))
+
+        applied, failed = [], []
+        for c in candidates[: self.MAX_PER_TICK]:
+            try:
+                r = remote.set_cpu_limit(c["pid"], 1, "Idle")
+            except Exception as exc:
+                failed.append({**c, "error": str(exc)})
+                continue
+            if not r.get("ok"):
+                failed.append({**c, "error": "亲和性=%s 优先级=%s" % (
+                    r.get("affinityOk"), r.get("priorityOk"))})
+                continue
+
+            rec = {
+                "pid": c["pid"], "name": c["name"], "label": c["label"],
+                "cpu": c["cpu"], "memPct": c["memPct"], "ws": c["ws"],
+                "reason": c["reason"], "ts": now,
+                "affinity": r.get("affinity"), "priority": r.get("priority"),
+            }
+            self.limited[c["pid"]] = rec
+            self.applied_total += 1
+            applied.append(rec)
+            STATE.log("warn", "自动限制游戏进程",
+                      f"{c['name']} (PID {c['pid']}) · {c['reason']} → 1 核 / Idle")
+
+        self.last_tick = now
+        self.last_error = "" if not failed else failed[0].get("error", "")
+        return {"ok": True, "checked": len(procs), "candidates": len(candidates),
+                "applied": applied, "failed": failed, "ts": now}
+
+    # -- 手动恢复
+
+    def restore(self, pids) -> list:
+        remote = STATE.remote
+        if remote is None:
+            raise HttpError(409, "尚未连接远程主机")
+        cores = max(int(STATE.system.get("cores") or 1), 1)
+        mask = (1 << cores) - 1
+        results = []
+        for pid in pids:
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                continue
+            try:
+                r = remote.set_cpu_limit(pid, mask, "Normal")
+                ok = bool(r.get("ok"))
+                err = "" if ok else "亲和性=%s 优先级=%s" % (
+                    r.get("affinityOk"), r.get("priorityOk"))
+            except Exception as exc:
+                ok, err = False, str(exc)
+            if ok:
+                rec = self.limited.pop(pid, {})
+                self.skip_until[pid] = time.time() + self.RESTORE_COOLDOWN
+                STATE.log("info", "恢复进程限制",
+                          f"{rec.get('name') or pid} (PID {pid}) → {cores} 核 / Normal")
+            results.append({"pid": pid, "ok": ok, "error": err})
+        return results
+
+    def status(self) -> dict:
+        with self.cfg.lock:
+            games = list(self.cfg.games.values())
+            enabled = self.cfg.enabled
+            threshold = self.cfg.threshold
+            interval = self.cfg.interval
+        games.sort(key=lambda g: (g["cat"], g["label"]))
+        limited = sorted(self.limited.values(), key=lambda r: -r["ts"])
+        return {
+            "enabled": enabled,
+            "threshold": threshold,
+            "intervalSec": interval,
+            "games": games,
+            "gameCount": len(games),
+            "defaultCount": len(DEFAULT_GAMES),
+            "limited": limited,
+            "limitedCount": len(limited),
+            "lastTick": self.last_tick,
+            "lastError": self.last_error,
+            "appliedTotal": self.applied_total,
+            "dataFile": self.cfg.path,
+        }
+
+
 # ---------------------------------------------------------------- 应用状态
 
 class AppState:
@@ -731,6 +1355,9 @@ class AppState:
 
 
 STATE = AppState()
+
+AUTO = AutoConfig(AUTO_FILE)
+LIMITER = AutoLimiter(AUTO)
 
 
 # ---------------------------------------------------------------- 路由
@@ -844,6 +1471,19 @@ def api_processes(body):
     t0 = time.time()
     data = remote.processes()
     data["elapsedMs"] = round((time.time() - t0) * 1000)
+
+    # 标注哪些进程在游戏名单里，前端据此显示角标
+    games = AUTO.games_map()
+    limited_pids = set(LIMITER.limited)
+    for p in data.get("processes") or []:
+        meta = games.get(normalize_proc(p.get("name")))
+        p["isGame"] = bool(meta)
+        p["gameLabel"] = meta["label"] if meta else None
+        p["autoLimited"] = p.get("pid") in limited_pids
+
+    data["auto"] = {"enabled": AUTO.enabled,
+                    "threshold": AUTO.threshold,
+                    "limited": len(LIMITER.limited)}
     return {"ok": True, **data}
 
 
@@ -993,6 +1633,80 @@ def api_netlimit_remove(body):
         raise RemoteError("删除限速策略失败", r.get("error", ""))
     STATE.log("info", "移除网速限制", name)
     return {"ok": True}
+
+
+# -- 自动限流（游戏进程）
+
+@route("GET", r"/api/auto")
+def api_auto_get(body):
+    return {"ok": True, **LIMITER.status()}
+
+
+@route("POST", r"/api/auto/settings")
+def api_auto_settings(body):
+    before = AUTO.enabled
+    AUTO.update(enabled=body.get("enabled"),
+                threshold=body.get("threshold"),
+                interval=body.get("intervalSec"))
+    if body.get("enabled") is not None and bool(body.get("enabled")) != before:
+        STATE.log("info", "自动限流已开启" if AUTO.enabled else "自动限流已关闭")
+    return {"ok": True, **LIMITER.status()}
+
+
+@route("POST", r"/api/auto/games")
+def api_auto_games(body):
+    action = (body.get("action") or "").strip().lower()
+    names = body.get("names")
+    if isinstance(names, str):
+        names = [names]
+    if names is None:
+        names = []
+
+    if action == "add":
+        added, skipped = [], []
+        for nm in names:
+            try:
+                r = AUTO.add_game(nm, body.get("label") or "")
+            except HttpError as exc:
+                skipped.append({"name": nm, "error": exc.message})
+                continue
+            added.append(r)
+        if added:
+            STATE.log("info", "添加游戏进程名",
+                      "、".join(a["proc"] for a in added))
+        return {"ok": True, "added": added, "skipped": skipped,
+                **LIMITER.status()}
+
+    if action == "remove":
+        removed = [normalize_proc(n) for n in names if AUTO.remove_game(n)]
+        if removed:
+            STATE.log("info", "移除游戏进程名", "、".join(removed))
+        return {"ok": True, "removed": removed, **LIMITER.status()}
+
+    if action == "reset":
+        n = AUTO.reset_games()
+        STATE.log("info", "恢复默认游戏名单", f"{n} 项")
+        return {"ok": True, "count": n, **LIMITER.status()}
+
+    raise HttpError(400, "未知操作，应为 add / remove / reset")
+
+
+@route("POST", r"/api/auto/scan")
+def api_auto_scan(body):
+    """立即巡检一轮（不等待后台定时器）"""
+    result = LIMITER.tick()
+    if not result.get("ok"):
+        raise HttpError(409, result.get("error") or "巡检失败")
+    return {"ok": True, "scan": result, **LIMITER.status()}
+
+
+@route("POST", r"/api/auto/restore")
+def api_auto_restore(body):
+    pids = body.get("pids") or []
+    if not pids:
+        raise HttpError(400, "未指定进程")
+    results = LIMITER.restore(pids)
+    return {"ok": True, "results": results, **LIMITER.status()}
 
 
 # ---------------------------------------------------------------- HTTP 服务
@@ -1165,6 +1879,9 @@ def main():
 
     if not args.no_browser and args.host in ("127.0.0.1", "localhost"):
         threading.Timer(0.8, lambda: _open_browser(url)).start()
+
+    # 自动限流巡检线程（常驻，配置开启时才真正干活）
+    LIMITER.start()
 
     try:
         server.serve_forever()

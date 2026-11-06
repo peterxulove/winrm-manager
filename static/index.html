@@ -170,6 +170,33 @@
       </div>
 
       <div class="panel">
+        <div class="panel-title">
+          自动限制游戏
+          <button class="panel-link" id="btn-auto-games">
+            名单 <b id="auto-game-count">0</b>
+          </button>
+        </div>
+
+        <div class="auto-row">
+          <label class="auto-switch" for="auto-limit-switch">
+            <span class="switch" id="auto-limit-switch" role="switch" aria-checked="false"></span>
+            <span id="auto-limit-label">已关闭</span>
+          </label>
+          <span class="auto-thr">
+            <input id="auto-threshold" type="number" min="1" max="100" step="1" value="15"
+                   title="触发阈值（CPU 或内存占全机的百分比）">
+            <span>%</span>
+          </span>
+        </div>
+
+        <div class="auto-hint">
+          游戏进程 CPU 或内存超过阈值时，自动限制为 <b>1 个核心</b> + <b>最低优先级</b>
+        </div>
+
+        <div class="auto-limited" id="auto-limited"></div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">快速筛选</div>
         <div class="filter-list" id="filter-list">
           <button class="filter-item active" data-filter="all">
